@@ -2,13 +2,14 @@
 
 from __future__ import annotations
 
+import json
 import sqlite3
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Sequence
 
 from utils.logger import get_logger
-from utils.paths import VACATIONS_DB_FILE, ensure_runtime_dirs
+from utils.paths import VACATIONS_DB_FILE, VACATIONS_JSON_FILE, ensure_runtime_dirs
 
 logger = get_logger("vacations_db")
 
@@ -98,3 +99,48 @@ def upsert_events(
         return count
     finally:
         conn.close()
+
+
+def default_json_path() -> Path:
+    ensure_runtime_dirs()
+    return VACATIONS_JSON_FILE
+
+
+def fetch_all_events(db_path: Path | None = None) -> list[dict[str, Any]]:
+    """Read all vacation_events rows (newest scrape first by ctl_index)."""
+    path = db_path or default_db_path()
+    if not path.exists():
+        return []
+    conn = connect(path)
+    try:
+        rows = conn.execute(
+            """
+            SELECT
+                event_tag, ctl_index, css_class, data_moment, title,
+                arrivee_depart, personne, personne_id, personne_filtre_key,
+                etablissement, etablissement_id, realise_par, lieu,
+                is_canceled, scraped_at
+            FROM vacation_events
+            ORDER BY ctl_index ASC, id ASC
+            """
+        ).fetchall()
+        return [dict(row) for row in rows]
+    finally:
+        conn.close()
+
+
+def export_events_jsonl(
+    records: Sequence[dict[str, Any]] | None = None,
+    *,
+    db_path: Path | None = None,
+    json_path: Path | None = None,
+) -> Path:
+    """Write one JSON object per line (JSONL). Returns output path."""
+    path = json_path or default_json_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    rows = list(records) if records is not None else fetch_all_events(db_path)
+    with path.open("w", encoding="utf-8", newline="\n") as fh:
+        for row in rows:
+            fh.write(json.dumps(row, ensure_ascii=False) + "\n")
+    logger.info("Vacation events JSONL exported | path=%s count=%s", path, len(rows))
+    return path

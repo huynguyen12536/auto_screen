@@ -64,16 +64,19 @@ def main() -> None:
             after_ressource,
             after_vue,
             vacations_db,
+            vacations_json,
         ) = service.open_agendas(stem_prefix=hint)
         print(f"Vacations SQLite: {vacations_db}")
+        print(f"Vacations JSONL: {vacations_json}")
         logger.info(
-            "Agendas screenshots | before=%s after=%s planning=%s ressource=%s vue=%s db=%s",
+            "Agendas screenshots | before=%s after=%s planning=%s ressource=%s vue=%s db=%s json=%s",
             before_agendas,
             after_agendas,
             after_planning,
             after_ressource,
             after_vue,
             vacations_db,
+            vacations_json,
         )
     except (LoginFailedError, AgendasNavigationError) as exc:
         print(f"Flow failed: {exc}")

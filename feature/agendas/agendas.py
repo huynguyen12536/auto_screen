@@ -51,7 +51,7 @@ class UegarAgendasFeature:
 
     def run(
         self, stem_prefix: str = "uegar"
-    ) -> tuple[Path, Path, Path, Path, Path, Path]:
+    ) -> tuple[Path, Path, Path, Path, Path, Path, Path]:
         button = self._agendas.button
         logger.info("Waiting for Agendas button | selector=%s", button)
         print(f"Waiting for Agendas: {button}...", flush=True)
@@ -127,18 +127,19 @@ class UegarAgendasFeature:
             )
 
         try:
-            saved, db_path = scrape_and_store_vacations(
+            saved, db_path, json_path = scrape_and_store_vacations(
                 self._page,
                 timeout_ms=self._timeout_ms,
             )
         except RuntimeError as exc:
             raise AgendasNavigationError(str(exc)) from exc
         logger.info(
-            "Vacations stored after steps complete | saved=%s db=%s",
+            "Vacations stored after steps complete | saved=%s db=%s json=%s",
             saved,
             db_path,
+            json_path,
         )
-        return before, after, planning, ressource, vue, db_path
+        return before, after, planning, ressource, vue, db_path, json_path
 
     def is_step1_planning_done(self) -> bool:
         planning = self._agendas.planning

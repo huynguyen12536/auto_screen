@@ -7,7 +7,12 @@ from typing import Any
 
 from playwright.sync_api import Page, TimeoutError as PlaywrightTimeoutError
 
-from feature.agendas.vacations_db import default_db_path, upsert_events
+from feature.agendas.vacations_db import (
+    default_db_path,
+    default_json_path,
+    export_events_jsonl,
+    upsert_events,
+)
 from utils.logger import get_logger
 from utils.timing import sleep
 
@@ -160,10 +165,12 @@ def scrape_and_store_vacations(
     page: Page,
     *,
     db_path: Path | None = None,
+    json_path: Path | None = None,
     timeout_ms: int = 30_000,
-) -> tuple[int, Path]:
-    """Wait for list, scroll to end, extract all cards, save to SQLite."""
+) -> tuple[int, Path, Path]:
+    """Wait for list, scroll to end, extract all cards, save SQLite + JSONL."""
     path = db_path or default_db_path()
+    out_json = json_path or default_json_path()
     logger.info("Waiting for vacation container | selector=%s", CONTAINER_SELECTOR)
     print(f"Waiting for {CONTAINER_SELECTOR}...", flush=True)
     try:
@@ -182,10 +189,13 @@ def scrape_and_store_vacations(
     records = extract_vacation_events(page)
     saved = upsert_events(records, db_path=path)
     print(f"Saved {saved} vacation events -> {path}", flush=True)
+    json_out = export_events_jsonl(records, db_path=path, json_path=out_json)
+    print(f"Exported JSONL ({saved} lines) -> {json_out}", flush=True)
     logger.info(
-        "Vacations scraped | dom=%s saved=%s db=%s",
+        "Vacations scraped | dom=%s saved=%s db=%s json=%s",
         count_scrolled,
         saved,
         path,
+        json_out,
     )
-    return saved, path
+    return saved, path, json_out

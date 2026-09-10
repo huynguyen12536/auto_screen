@@ -14,6 +14,7 @@ LOG_DIR = RUNTIME_DIR / "logs"
 TEMP_DIR = RUNTIME_DIR / "temp"
 DATA_DIR = RUNTIME_DIR / "data"
 VACATIONS_DB_FILE = DATA_DIR / "vacations.sqlite"
+VACATIONS_JSON_FILE = DATA_DIR / "vacations.jsonl"
 
 APP_LOG_FILE = LOG_DIR / "app.log"
 
