@@ -1,0 +1,35 @@
+# Core automation
+pyautogui
+opencv-python
+numpy
+Pillow
+pywin32
+pygetwindow
+mss
+psutil
+playwright
+
+# Config / communication
+requests
+python-dotenv
+pyyaml
+jsonschema
+
+# Input automation
+pynput
+
+# OCR (do not load models at startup)
+pytesseract
+easyocr
+scikit-image
+imagehash
+
+# Dev
+pytest
+black
+flake8
+
+# AI / ML
+google-generativeai
+# tensorflow
+# torch

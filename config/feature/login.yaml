@@ -1,0 +1,13 @@
+# Popup login on profile pages ("See more on Facebook" / "Xem thêm trên Facebook")
+# Ratios relative to full browser window (measured from maximized capture).
+type_interval: 0.04
+submit_wait: 45
+email:
+  x_ratio: 0.495
+  y_ratio: 0.425
+password:
+  x_ratio: 0.495
+  y_ratio: 0.497
+submit:
+  x_ratio: 0.495
+  y_ratio: 0.568

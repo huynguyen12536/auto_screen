@@ -1,0 +1,27 @@
+browser:
+  name: chrome
+  # playwright = capture/interact even when no visible window (headless)
+  # desktop = old pygetwindow/mss path (needs visible window)
+  engine: playwright
+  headless: true
+  guest: true
+  viewport:
+    width: 1920
+    height: 1080
+  # Wait until this CSS selector is visible before screenshot/login.
+  ready_selector: ".mainContainer"
+  ready_timeout_ms: 120000
+
+timing:
+  browser_start_timeout: 120
+  page_load_delay: 1
+  action_delay: 0.35
+  human:
+    enabled: true
+    min_time: 0.25
+    max_time: 1.2
+    mean: 0.45
+    std_dev: 0.15
+
+logging:
+  level: INFO

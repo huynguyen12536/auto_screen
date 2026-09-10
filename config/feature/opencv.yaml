@@ -1,0 +1,10 @@
+enabled: true
+use_optimized: true
+# 0 keeps OpenCV default threads. Use 1+ to pin a thread count.
+num_threads: 0
+color:
+  use_grayscale: true
+  interpolation: linear
+match:
+  method: tm_ccoeff_normed
+  threshold: 0.8
