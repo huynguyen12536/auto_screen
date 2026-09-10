@@ -1,7 +1,7 @@
 """Playwright browser controller.
 
-Works headless, so screenshots and interactions still work when no
-desktop window is visible (including minimized tabs).
+Headed mode opens a real Chromium window. Capture still works if the
+window is minimized because screenshots go through Playwright CDP.
 """
 
 from __future__ import annotations
@@ -27,7 +27,7 @@ logger = get_logger("playwright")
 class PlaywrightBrowserController:
     def __init__(
         self,
-        headless: bool = True,
+        headless: bool = False,
         viewport_width: int = 1920,
         viewport_height: int = 1080,
         navigation_timeout_ms: float = 120_000,
@@ -59,16 +59,36 @@ class PlaywrightBrowserController:
             self._viewport["width"],
             self._viewport["height"],
         )
+        print(
+            f"Opening Chromium window (headless={self._headless})...",
+            flush=True,
+        )
+        if not self._headless:
+            print(
+                "You can minimize the browser; Playwright can still capture/interact.",
+                flush=True,
+            )
         self._playwright = sync_playwright().start()
-        self._browser = self._playwright.chromium.launch(headless=self._headless)
-        self._context = self._browser.new_context(viewport=self._viewport)
+        launch_args: list[str] = []
+        if not self._headless:
+            launch_args.append("--start-maximized")
+        self._browser = self._playwright.chromium.launch(
+            headless=self._headless,
+            args=launch_args,
+        )
+        # Headed: no fixed viewport so the real window can maximize.
+        if self._headless:
+            self._context = self._browser.new_context(viewport=self._viewport)
+        else:
+            self._context = self._browser.new_context(no_viewport=True)
         self._page = self._context.new_page()
         self._page.set_default_timeout(self._navigation_timeout_ms)
+        print("Chromium started.", flush=True)
 
     def navigate(
         self,
         url: str,
-        wait_until: str = "domcontentloaded",
+        wait_until: str = "commit",
         ready_selector: str | None = None,
     ) -> None:
         if not url:
@@ -81,7 +101,10 @@ class PlaywrightBrowserController:
             wait_until,
             selector,
         )
+        print(f"Loading page: {url}", flush=True)
         try:
+            # "commit" returns as soon as navigation response starts.
+            # ASP.NET sites often hang on domcontentloaded/networkidle.
             response = self.page.goto(
                 url,
                 wait_until=wait_until,
@@ -89,12 +112,12 @@ class PlaywrightBrowserController:
             )
             status = response.status if response is not None else "No response"
             logger.info("HTTP status | status=%s", status)
+            print(f"HTTP status: {status}", flush=True)
 
-            # Prefer rendered UI over networkidle (site may never go idle).
             self.wait_for_ready(selector)
-            logger.info(
-                "Website ready | title=%s selector=%s", self.page.title(), selector
-            )
+            title = self.page.title()
+            logger.info("Website ready | title=%s selector=%s", title, selector)
+            print(f"Website ready: {title}", flush=True)
         except PlaywrightTimeoutError as exc:
             logger.error(
                 "Website load timeout | url=%s selector=%s error=%s",
@@ -102,6 +125,7 @@ class PlaywrightBrowserController:
                 selector,
                 exc,
             )
+            print("Website load timeout", flush=True)
             raise
 
     def wait_for_ready(self, selector: str | None = None) -> None:
@@ -112,6 +136,10 @@ class PlaywrightBrowserController:
             "Waiting for visible element | selector=%s timeout_ms=%s",
             target,
             self._ready_timeout_ms,
+        )
+        print(
+            f"Waiting for visible: {target} (timeout {self._ready_timeout_ms}ms)...",
+            flush=True,
         )
         self.page.locator(target).first.wait_for(
             state="visible",

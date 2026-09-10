@@ -1,9 +1,11 @@
 browser:
   name: chrome
-  # playwright = capture/interact even when no visible window (headless)
-  # desktop = old pygetwindow/mss path (needs visible window)
+  # playwright = real Chromium window; screenshot/interact still works when minimized
+  # desktop = old mss/pygetwindow path (needs visible, non-minimized window)
   engine: playwright
-  headless: true
+  # false = open a real browser window (user may minimize it anytime)
+  # true  = no window at all (fully invisible headless)
+  headless: false
   guest: true
   viewport:
     width: 1920

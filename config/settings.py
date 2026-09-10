@@ -116,34 +116,80 @@ OPENCV_SCHEMA: dict[str, Any] = {
 
 LOGIN_SCHEMA: dict[str, Any] = {
     "type": "object",
-    "required": ["type_interval", "submit_wait", "email", "password", "submit"],
+    "required": ["submit_wait", "selectors"],
     "properties": {
-        "type_interval": {"type": "number"},
         "submit_wait": {"type": "number"},
-        "email": {
+        "type_interval": {"type": "number"},
+        "selectors": {
             "type": "object",
-            "required": ["x_ratio", "y_ratio"],
+            "required": ["username", "password", "submit"],
             "properties": {
-                "x_ratio": {"type": "number", "minimum": 0, "maximum": 1},
-                "y_ratio": {"type": "number", "minimum": 0, "maximum": 1},
+                "username": {"type": "string", "minLength": 1},
+                "password": {"type": "string", "minLength": 1},
+                "submit": {"type": "string", "minLength": 1},
             },
         },
-        "password": {
+        "after_login": {
             "type": "object",
-            "required": ["x_ratio", "y_ratio"],
             "properties": {
-                "x_ratio": {"type": "number", "minimum": 0, "maximum": 1},
-                "y_ratio": {"type": "number", "minimum": 0, "maximum": 1},
+                "ready_selector": {"type": "string", "minLength": 1},
+                "url_contains": {"type": "string"},
+                "loading_hidden_selector": {"type": "string"},
+                "agendas": {
+                    "type": "object",
+                    "properties": {
+                        "button": {"type": "string", "minLength": 1},
+                        "after_ready_selector": {"type": "string", "minLength": 1},
+                        "url_contains": {"type": "string"},
+                        "planning": {
+                            "type": "object",
+                            "properties": {
+                                "dropdown_button": {"type": "string", "minLength": 1},
+                                "option": {"type": "string", "minLength": 1},
+                                "option_label": {"type": "string", "minLength": 1},
+                                "selected_value": {"type": "string"},
+                                "ready_after_select": {
+                                    "type": "string",
+                                    "minLength": 1,
+                                },
+                            },
+                        },
+                        "ressource": {
+                            "type": "object",
+                            "properties": {
+                                "dropdown_button": {"type": "string", "minLength": 1},
+                                "select_all": {"type": "string", "minLength": 1},
+                                "change_debounce_seconds": {"type": "number"},
+                                "ready_after_select": {
+                                    "type": "string",
+                                    "minLength": 1,
+                                },
+                            },
+                        },
+                        "vue": {
+                            "type": "object",
+                            "properties": {
+                                "dropdown_button": {"type": "string", "minLength": 1},
+                                "option": {"type": "string", "minLength": 1},
+                                "option_label": {"type": "string", "minLength": 1},
+                                "selected_value": {"type": "string"},
+                                "ready_after_select": {
+                                    "type": "string",
+                                    "minLength": 1,
+                                },
+                            },
+                        },
+                    },
+                },
             },
         },
-        "submit": {
-            "type": "object",
-            "required": ["x_ratio", "y_ratio"],
-            "properties": {
-                "x_ratio": {"type": "number", "minimum": 0, "maximum": 1},
-                "y_ratio": {"type": "number", "minimum": 0, "maximum": 1},
-            },
+        "failure_texts": {
+            "type": "array",
+            "items": {"type": "string"},
         },
+        "email": {"type": "object"},
+        "password": {"type": "object"},
+        "submit": {"type": "object"},
     },
 }
 
@@ -206,18 +252,54 @@ class OpenCvSettings:
 
 
 @dataclass(frozen=True)
-class PointRatio:
-    x_ratio: float
-    y_ratio: float
+class LoginSelectors:
+    username: str
+    password: str
+    submit: str
+
+
+@dataclass(frozen=True)
+class PlanningSelectSettings:
+    dropdown_button: str
+    option: str
+    option_label: str
+    selected_value: str
+    ready_after_select: str
+
+
+@dataclass(frozen=True)
+class RessourceSelectSettings:
+    dropdown_button: str
+    select_all: str
+    ready_after_select: str
+    change_debounce_seconds: float = 1.2
+
+
+@dataclass(frozen=True)
+class AgendasSettings:
+    button: str
+    after_ready_selector: str
+    url_contains: str = "4008001"
+    planning: PlanningSelectSettings | None = None
+    ressource: RessourceSelectSettings | None = None
+    vue: PlanningSelectSettings | None = None
+
+
+@dataclass(frozen=True)
+class AfterLoginSettings:
+    ready_selector: str
+    url_contains: str = ""
+    loading_hidden_selector: str = "#loadingScreen"
+    agendas: AgendasSettings | None = None
 
 
 @dataclass(frozen=True)
 class LoginSettings:
-    type_interval: float
     submit_wait: float
-    email: PointRatio
-    password: PointRatio
-    submit: PointRatio
+    selectors: LoginSelectors
+    failure_texts: tuple[str, ...]
+    after_login: AfterLoginSettings
+    type_interval: float = 0.04
 
 
 @dataclass(frozen=True)
@@ -277,10 +359,117 @@ def _env_float(name: str, default: float) -> float:
     return float(value)
 
 
-def _point_ratio(raw: dict[str, Any]) -> PointRatio:
-    return PointRatio(
-        x_ratio=float(raw["x_ratio"]),
-        y_ratio=float(raw["y_ratio"]),
+def _build_login_settings(raw: dict[str, Any]) -> LoginSettings:
+    selectors = raw["selectors"]
+    failure_texts = tuple(str(item) for item in (raw.get("failure_texts") or []))
+    after_raw = raw.get("after_login") or {}
+    agendas_raw = after_raw.get("agendas") or {}
+    agendas = None
+    if agendas_raw:
+        planning_raw = agendas_raw.get("planning") or {}
+        planning = None
+        if planning_raw:
+            planning = PlanningSelectSettings(
+                dropdown_button=str(
+                    planning_raw.get(
+                        "dropdown_button",
+                        'button.drop-down[control-id="DDLChoixPlanningData"]',
+                    )
+                ),
+                option=str(
+                    planning_raw.get("option", "#DDLChoixPlanningData_ctl01")
+                ),
+                option_label=str(planning_raw.get("option_label", "BRESSUIRE")),
+                selected_value=str(planning_raw.get("selected_value", "0")),
+                ready_after_select=str(
+                    planning_raw.get(
+                        "ready_after_select",
+                        "#glyphBtnFonctionnaliteEnCours.prev-calendar",
+                    )
+                ),
+            )
+        ressource_raw = agendas_raw.get("ressource") or {}
+        ressource = None
+        if ressource_raw:
+            ressource = RessourceSelectSettings(
+                dropdown_button=str(
+                    ressource_raw.get(
+                        "dropdown_button",
+                        'button.drop-down[control-id="DDLChoixRessourceMultipleData"]',
+                    )
+                ),
+                select_all=str(
+                    ressource_raw.get(
+                        "select_all",
+                        "#DDLChoixRessourceMultipleData_chkAll",
+                    )
+                ),
+                ready_after_select=str(
+                    ressource_raw.get(
+                        "ready_after_select",
+                        "#glyphBtnFonctionnaliteEnCours.prev-calendar",
+                    )
+                ),
+                change_debounce_seconds=float(
+                    ressource_raw.get("change_debounce_seconds", 1.2)
+                ),
+            )
+        vue_raw = agendas_raw.get("vue") or {}
+        vue = None
+        if vue_raw:
+            vue = PlanningSelectSettings(
+                dropdown_button=str(
+                    vue_raw.get(
+                        "dropdown_button",
+                        'button.drop-down[control-id="ucChoixDesVues_DDLChoixVue"]',
+                    )
+                ),
+                option=str(
+                    vue_raw.get("option", "#ucChoixDesVues_DDLChoixVue_ctl00")
+                ),
+                option_label=str(vue_raw.get("option_label", "File d'attente")),
+                selected_value=str(vue_raw.get("selected_value", "6")),
+                ready_after_select=str(
+                    vue_raw.get(
+                        "ready_after_select",
+                        "#glyphBtnFonctionnaliteEnCours.prev-calendar",
+                    )
+                ),
+            )
+        agendas = AgendasSettings(
+            button=str(
+                agendas_raw.get("button", "#repeaterPalette_ctl01_btnDiv")
+            ),
+            after_ready_selector=str(
+                agendas_raw.get(
+                    "after_ready_selector",
+                    "#repeaterPalette_ctl01_btnDiv.SelectedItem",
+                )
+            ),
+            url_contains=str(agendas_raw.get("url_contains", "4008001")),
+            planning=planning,
+            ressource=ressource,
+            vue=vue,
+        )
+    return LoginSettings(
+        submit_wait=float(raw["submit_wait"]),
+        selectors=LoginSelectors(
+            username=str(selectors["username"]),
+            password=str(selectors["password"]),
+            submit=str(selectors["submit"]),
+        ),
+        failure_texts=failure_texts,
+        after_login=AfterLoginSettings(
+            ready_selector=str(
+                after_raw.get("ready_selector", "#repeaterPalette_ctl01_btnDiv")
+            ),
+            url_contains=str(after_raw.get("url_contains", "accueilv2.aspx")),
+            loading_hidden_selector=str(
+                after_raw.get("loading_hidden_selector", "#loadingScreen")
+            ),
+            agendas=agendas,
+        ),
+        type_interval=float(raw.get("type_interval", 0.04)),
     )
 
 
@@ -314,7 +503,7 @@ def _build_settings(
         browser=BrowserSettings(
             name=browser_name or "chrome",
             engine=str(raw["browser"].get("engine", "playwright")).lower(),
-            headless=bool(raw["browser"].get("headless", True)),
+            headless=bool(raw["browser"].get("headless", False)),
             guest=bool(raw["browser"].get("guest", True)),
             viewport=ViewportSettings(
                 width=int((raw["browser"].get("viewport") or {}).get("width", 1920)),
@@ -344,13 +533,7 @@ def _build_settings(
             match_method=str(opencv_raw["match"]["method"]),
             match_threshold=opencv_threshold,
         ),
-        login=LoginSettings(
-            type_interval=float(login_raw["type_interval"]),
-            submit_wait=float(login_raw["submit_wait"]),
-            email=_point_ratio(login_raw["email"]),
-            password=_point_ratio(login_raw["password"]),
-            submit=_point_ratio(login_raw["submit"]),
-        ),
+        login=_build_login_settings(login_raw),
         target_url=_env("TARGET_URL"),
         target_username=_env("TARGET_USERNAME"),
         target_password=_env("TARGET_PASSWORD"),

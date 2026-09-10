@@ -1,13 +1,41 @@
-# Popup login on profile pages ("See more on Facebook" / "Xem thêm trên Facebook")
-# Ratios relative to full browser window (measured from maximized capture).
-type_interval: 0.04
-submit_wait: 45
-email:
-  x_ratio: 0.495
-  y_ratio: 0.425
-password:
-  x_ratio: 0.495
-  y_ratio: 0.497
-submit:
-  x_ratio: 0.495
-  y_ratio: 0.568
+# uEgar login form (Playwright selectors)
+submit_wait: 120
+selectors:
+  username: "#ucAuthenticationForm1_textBoxIdentifiant"
+  password: "#ucAuthenticationForm1_textBoxPassword"
+  submit: "#ucAuthenticationForm1_lnkConfirmer"
+# After login: wait for Agendas palette button (replaces .mainContainer check).
+after_login:
+  ready_selector: "#repeaterPalette_ctl01_btnDiv"
+  url_contains: "accueilv2.aspx"
+  loading_hidden_selector: "#loadingScreen"
+  agendas:
+    button: "#repeaterPalette_ctl01_btnDiv"
+    # After click, URL uses Code=4008001 and the button becomes SelectedItem.
+    after_ready_selector: "#repeaterPalette_ctl01_btnDiv.SelectedItem, #ctl00_lbTitreFonctionnalite"
+    url_contains: "4008001"
+    planning:
+      dropdown_button: 'button.drop-down[control-id="DDLChoixPlanningData"]'
+      option: "#DDLChoixPlanningData_ctl01"
+      option_label: "BRESSUIRE"
+      selected_value: "0"
+      ready_after_select: "#glyphBtnFonctionnaliteEnCours.prev-calendar"
+    ressource:
+      dropdown_button: 'button.drop-down[control-id="DDLChoixRessourceMultipleData"]'
+      select_all: "#DDLChoixRessourceMultipleData_chkAll"
+      change_debounce_seconds: 1.2
+      ready_after_select: "#glyphBtnFonctionnaliteEnCours.prev-calendar"
+    vue:
+      dropdown_button: 'button.drop-down[control-id="ucChoixDesVues_DDLChoixVue"]'
+      option: "#ucChoixDesVues_DDLChoixVue_ctl00"
+      option_label: "File d'attente"
+      selected_value: "6"
+      ready_after_select: "#glyphBtnFonctionnaliteEnCours.prev-calendar"
+failure_texts:
+  - "identifiant ou mot de passe"
+  - "mot de passe incorrect"
+  - "identifiant incorrect"
+  - "accès refusé"
+  - "acces refuse"
+  - "authentication failed"
+  - "unauthorized"

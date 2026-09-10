@@ -10,7 +10,9 @@ from automation.keyboard import KeyboardController
 from automation.mouse import MouseController
 from automation.playwright_browser import PlaywrightBrowserController
 from automation.window import WindowController
+from feature.agendas import UegarAgendasFeature
 from feature.capture.screenshot import ScreenshotCapture
+from feature.login import UegarLoginFeature
 from utils.logger import get_logger
 from utils.timing import sleep, sleep_human, wait_until
 
@@ -68,7 +70,7 @@ class BrowserAutomationService:
         if self._use_playwright:
             self._playwright.navigate(
                 url,
-                wait_until="domcontentloaded",
+                wait_until="commit",
                 ready_selector=self._settings.browser.ready_selector,
             )
             sleep(self._settings.timing.page_load_delay)
@@ -88,54 +90,51 @@ class BrowserAutomationService:
         sleep(self._settings.timing.page_load_delay)
 
     def login(self) -> None:
-        if self._use_playwright:
+        """Log in once. On failure raises LoginFailedError (no retry)."""
+        if not self._use_playwright:
             raise NotImplementedError(
-                "Playwright login selectors are not configured yet."
+                "uEgar login requires browser.engine=playwright"
             )
-        username = self._settings.target_username
-        password = self._settings.target_password
-        if not username or not password:
-            raise ValueError("TARGET_USERNAME and TARGET_PASSWORD must be set in .env")
-        if self._current_window is None:
-            hint = title_hint_from_url(self._settings.target_url)
-            self._current_window = self._window.find_browser_window(hint)
-        if self._current_window is None:
-            raise ValueError("Browser window was not found for login")
-
-        logger.info("Starting login")
-        self._current_window = self._window.prepare_for_capture(
-            self._current_window,
-            timeout=self._settings.timing.browser_start_timeout,
+        feature = UegarLoginFeature(
+            page=self._playwright.page,
+            settings=self._settings,
+            action_pause=self._action_pause,
         )
-        bounds = self._window.get_bounds(self._current_window)
-        login = self._settings.login
-        interval = login.type_interval
+        feature.run()
 
-        self._mouse.click_ratio(bounds, login.email.x_ratio, login.email.y_ratio)
-        self._action_pause()
-        self._keyboard.hotkey("ctrl", "a")
-        self._keyboard.press("backspace")
-        self._keyboard.type_text(username, interval=interval)
-        self._action_pause()
-        self._mouse.click_ratio(bounds, login.password.x_ratio, login.password.y_ratio)
-        self._action_pause()
-        self._keyboard.hotkey("ctrl", "a")
-        self._keyboard.press("backspace")
-        self._keyboard.type_text(password, interval=interval, secret=True)
-        self._action_pause()
-        self._mouse.click_ratio(bounds, login.submit.x_ratio, login.submit.y_ratio)
-        self._action_pause()
-        self._keyboard.press("enter")
-        logger.info("Login submitted, waiting for page")
-        sleep(login.submit_wait)
+    def open_agendas(
+        self, stem_prefix: str = "uegar"
+    ) -> tuple[Path, Path, Path, Path, Path, Path]:
+        """Open Agendas, run B1–B3, scrape vacations to SQLite; return paths."""
+        if not self._use_playwright:
+            raise NotImplementedError(
+                "Agendas navigation requires browser.engine=playwright"
+            )
+        feature = UegarAgendasFeature(
+            page=self._playwright.page,
+            settings=self._settings,
+            screenshot=self.capture_current_page,
+            action_pause=self._action_pause,
+        )
+        return feature.run(stem_prefix=stem_prefix)
 
-    def capture_current_page(self, stem: str | None = None) -> Path:
+    def capture_current_page(
+        self,
+        stem: str | None = None,
+        *,
+        wait_ready: bool = True,
+        ready_selector: str | None = None,
+        settle_seconds: float = 0.0,
+    ) -> Path:
         hint = title_hint_from_url(self._settings.target_url) or "page"
         output_path = self._capture.build_output_path(stem or f"{hint}_page")
 
         if self._use_playwright:
-            # Re-check ready state right before capture to avoid black frames.
-            self._playwright.wait_for_ready(self._settings.browser.ready_selector)
+            if settle_seconds > 0:
+                sleep(settle_seconds)
+            if wait_ready:
+                selector = ready_selector or self._settings.browser.ready_selector
+                self._playwright.wait_for_ready(selector)
             return self._playwright.screenshot(
                 output_path,
                 full_page=self._settings.capture.full_page,

@@ -50,8 +50,24 @@ def test_settings_load_successfully():
     assert settings.environment
     assert settings.opencv.enabled is True
     assert settings.target_url.startswith("http")
-    assert 0 < settings.login.email.x_ratio < 1
+    assert settings.login.selectors.username
+    assert settings.login.selectors.password
+    assert settings.login.selectors.submit
+    assert settings.login.after_login.ready_selector == "#repeaterPalette_ctl01_btnDiv"
+    assert settings.login.after_login.agendas is not None
+    assert settings.login.after_login.agendas.button == "#repeaterPalette_ctl01_btnDiv"
+    assert settings.login.after_login.agendas.planning is not None
+    assert settings.login.after_login.agendas.planning.option_label == "BRESSUIRE"
+    assert settings.login.after_login.agendas.ressource is not None
+    assert (
+        settings.login.after_login.agendas.ressource.select_all
+        == "#DDLChoixRessourceMultipleData_chkAll"
+    )
+    assert settings.login.after_login.agendas.vue is not None
+    assert settings.login.after_login.agendas.vue.option_label == "File d'attente"
+    assert settings.login.after_login.agendas.vue.selected_value == "6"
     assert settings.login.submit_wait > 0
+    assert len(settings.login.failure_texts) > 0
 
 
 def test_credentials_are_masked():

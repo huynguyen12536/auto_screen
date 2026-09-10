@@ -12,6 +12,8 @@ RUNTIME_DIR = PROJECT_ROOT / "runtime"
 SCREENSHOT_DIR = RUNTIME_DIR / "screenshots"
 LOG_DIR = RUNTIME_DIR / "logs"
 TEMP_DIR = RUNTIME_DIR / "temp"
+DATA_DIR = RUNTIME_DIR / "data"
+VACATIONS_DB_FILE = DATA_DIR / "vacations.sqlite"
 
 APP_LOG_FILE = LOG_DIR / "app.log"
 
@@ -25,5 +27,5 @@ def resolve_project_path(value: str) -> Path:
 
 def ensure_runtime_dirs() -> None:
     """Create runtime folders if they do not already exist."""
-    for directory in (RUNTIME_DIR, SCREENSHOT_DIR, LOG_DIR, TEMP_DIR):
+    for directory in (RUNTIME_DIR, SCREENSHOT_DIR, LOG_DIR, TEMP_DIR, DATA_DIR):
         directory.mkdir(parents=True, exist_ok=True)

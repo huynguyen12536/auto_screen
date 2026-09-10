@@ -25,10 +25,14 @@ env/
 runtime/screenshots/*
 runtime/logs/*
 runtime/temp/*
+runtime/data/*
+runtime/debug_after_login/*
 
 !runtime/screenshots/.gitkeep
 !runtime/logs/.gitkeep
 !runtime/temp/.gitkeep
+!runtime/data/.gitkeep
+!runtime/debug_after_login/.gitkeep
 
 # IDE
 .idea/
