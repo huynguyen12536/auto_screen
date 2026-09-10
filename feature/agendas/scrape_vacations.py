@@ -19,6 +19,14 @@ from utils.timing import sleep
 logger = get_logger("scrape_vacations")
 
 CONTAINER_SELECTOR = "#divContainerVacations"
+RESSOURCE_LINK_SUFFIX = "_ucRessourcePrincipaleEventData_lnkBtnRessourceData"
+DIALOG_VISIBLE = ".ui-dialog:visible"
+DIALOG_IFRAME = ".ui-dialog:visible iframe"
+DIALOG_CLOSE = (
+    ".ui-dialog:visible button.ui-dialog-titlebar-close, "
+    ".ui-dialog:visible .ui-dialog-titlebar-close"
+)
+DETAIL_READY = "#ctl00_placeHolderContenuFormSansOnglet_lbIdentiteData"
 
 _EXTRACT_JS = """
 () => {
@@ -50,6 +58,8 @@ _EXTRACT_JS = """
         .map((s) => s.replace(/\\s+/g, ' ').trim())
         .filter(Boolean)
         .join(' | ');
+    const onclick = (ressourceA && ressourceA.getAttribute('onclick')) || '';
+    const idMatch = onclick.match(/frmDetailFonction\\.aspx\\?Id=([^'\"&]+)/i);
     return {
       event_tag: el.getAttribute('tag') || '',
       ctl_index: m ? parseInt(m[1], 10) : null,
@@ -65,10 +75,58 @@ _EXTRACT_JS = """
       etablissement: clean(etabA ? etabA.innerText : ''),
       etablissement_id: (etabUc && etabUc.getAttribute('data-key')) || '',
       realise_par: clean(ressourceA ? ressourceA.innerText : ''),
+      ressource_fonction_id: idMatch ? idMatch[1] : '',
       lieu: clean(lieuEl ? lieuEl.innerText : ''),
       is_canceled: el.classList.contains('Canceled') ? 1 : 0,
     };
   });
+}
+"""
+
+_DETAIL_EXTRACT_JS = """
+() => {
+  const clean = (t) => (t || '').replace(/\\s+/g, ' ').trim();
+  const stripColon = (t) => clean(t).replace(/\\s*:\\s*$/, '');
+  const out = {};
+  const hid = document.querySelector(
+    '#ctl00_placeHolderContenuFormSansOnglet_HiddenFieldIDFonction'
+  );
+  if (hid && hid.value) out['_fonction_id'] = hid.value;
+
+  const rows = document.querySelectorAll('.row.form-group');
+  for (const row of rows) {
+    const labelEl = row.querySelector('.form-label, [id*="lb"]');
+    let label = '';
+    if (labelEl) {
+      const span = labelEl.querySelector('span') || labelEl;
+      label = stripColon(span.innerText || span.textContent || '');
+    }
+    if (!label) continue;
+    const valueRoot = row.querySelector('.col-8') || row;
+    const mail = valueRoot.querySelector('a[href^="mailto:"]');
+    let value = '';
+    if (mail) value = clean(mail.innerText || mail.getAttribute('href') || '');
+    else value = clean(valueRoot.innerText || '');
+    out[label] = value;
+  }
+
+  // Named fallbacks if label scrape missed anything.
+  const named = [
+    ['Civilité', '#ctl00_placeHolderContenuFormSansOnglet_ucCiviliteData_lbItemData'],
+    ['Identité', '#ctl00_placeHolderContenuFormSansOnglet_lbIdentiteData'],
+    ['Téléphone professionnel', '#ctl00_placeHolderContenuFormSansOnglet_lbTelBureauData'],
+    ['Courriel professionnel', '#ctl00_placeHolderContenuFormSansOnglet_ucEmailProData_lbCourrielData'],
+    ['Fax', '#ctl00_placeHolderContenuFormSansOnglet_lbFaxData'],
+    ['Type de fonction', '#ctl00_placeHolderContenuFormSansOnglet_lbTypePersonnelData'],
+  ];
+  for (const [key, sel] of named) {
+    if (out[key]) continue;
+    const el = document.querySelector(sel);
+    if (!el) continue;
+    const mail = el.querySelector('a[href^="mailto:"]');
+    out[key] = clean(mail ? mail.innerText : el.innerText);
+  }
+  return out;
 }
 """
 
@@ -154,10 +212,222 @@ def extract_vacation_events(page: Page) -> list[dict[str, Any]]:
                 "etablissement": str(item.get("etablissement") or ""),
                 "etablissement_id": str(item.get("etablissement_id") or ""),
                 "realise_par": str(item.get("realise_par") or ""),
+                "ressource_fonction_id": str(item.get("ressource_fonction_id") or ""),
                 "lieu": str(item.get("lieu") or ""),
                 "is_canceled": int(item.get("is_canceled") or 0),
+                "ressource_detail": {},
             }
         )
+    return records
+
+
+def _scroll_event_into_view(page: Page, event_tag: str) -> None:
+    page.evaluate(
+        """({sel, tag}) => {
+          const root = document.querySelector(sel);
+          if (!root) return;
+          const card = root.querySelector('[tag="' + tag + '"]');
+          if (!card) return;
+          card.scrollIntoView({ block: 'center', inline: 'nearest' });
+        }""",
+        {"sel": CONTAINER_SELECTOR, "tag": event_tag},
+    )
+    sleep(0.15)
+
+
+def _ressource_link_locator(page: Page, event_tag: str):
+    return page.locator(
+        f'{CONTAINER_SELECTOR} [tag="{event_tag}"] '
+        f'a[id$="{RESSOURCE_LINK_SUFFIX}"]'
+    ).first
+
+
+def _close_ressource_dialog(page: Page, timeout_ms: int) -> None:
+    close = page.locator(DIALOG_CLOSE).first
+    if close.count() > 0:
+        try:
+            close.click(force=True, timeout=min(5_000, timeout_ms))
+        except Exception:
+            page.keyboard.press("Escape")
+    else:
+        page.keyboard.press("Escape")
+    try:
+        page.locator(DIALOG_VISIBLE).first.wait_for(
+            state="hidden",
+            timeout=min(10_000, timeout_ms),
+        )
+    except PlaywrightTimeoutError:
+        page.evaluate(
+            """() => {
+              document.querySelectorAll('.ui-dialog').forEach((el) => {
+                el.style.display = 'none';
+              });
+              document.querySelectorAll('.ui-widget-overlay').forEach((el) => {
+                el.remove();
+              });
+            }"""
+        )
+    sleep(0.2)
+
+
+def _extract_detail_from_open_dialog(page: Page, timeout_ms: int) -> dict[str, Any]:
+    """Read key/values from the modal iframe (or dialog DOM fallback)."""
+    page.locator(DIALOG_VISIBLE).first.wait_for(state="visible", timeout=timeout_ms)
+
+    # Wait until identity field appears in any frame / main page.
+    deadline_ms = timeout_ms
+    step = 250
+    waited = 0
+    target_frame = None
+    while waited <= deadline_ms:
+        for frame in page.frames:
+            try:
+                if frame.locator(DETAIL_READY).count() > 0:
+                    target_frame = frame
+                    break
+            except Exception:
+                continue
+        if target_frame is not None:
+            break
+        if page.locator(DETAIL_READY).count() > 0:
+            break
+        sleep(step / 1000)
+        waited += step
+
+    if target_frame is not None:
+        try:
+            target_frame.locator(DETAIL_READY).first.wait_for(
+                state="visible",
+                timeout=min(5_000, timeout_ms),
+            )
+        except PlaywrightTimeoutError:
+            pass
+        raw = target_frame.evaluate(_DETAIL_EXTRACT_JS)
+    else:
+        page.locator(DETAIL_READY).first.wait_for(
+            state="visible",
+            timeout=min(8_000, timeout_ms),
+        )
+        raw = page.evaluate(_DETAIL_EXTRACT_JS)
+
+    if not isinstance(raw, dict):
+        return {}
+    return {str(k): str(v) if v is not None else "" for k, v in raw.items()}
+
+
+def open_and_scrape_ressource_detail(
+    page: Page,
+    event_tag: str,
+    *,
+    timeout_ms: int = 30_000,
+) -> dict[str, Any]:
+    """Click realise_par link for one card, scrape modal key/values, then close."""
+    _scroll_event_into_view(page, event_tag)
+    link = _ressource_link_locator(page, event_tag)
+    if link.count() == 0:
+        logger.warning("No ressource link for event_tag=%s", event_tag)
+        return {}
+
+    link.wait_for(state="visible", timeout=timeout_ms)
+    link.click(force=True)
+
+    try:
+        return _extract_detail_from_open_dialog(page, timeout_ms)
+    finally:
+        _close_ressource_dialog(page, timeout_ms)
+
+
+def enrich_with_ressource_details(
+    page: Page,
+    records: list[dict[str, Any]],
+    *,
+    timeout_ms: int = 30_000,
+) -> list[dict[str, Any]]:
+    """
+    For each vacation card, open Détail de la ressource, collect key/values,
+    close the dialog. Cache by ressource_fonction_id to avoid duplicate opens.
+    """
+    cache: dict[str, dict[str, Any]] = {}
+    total = len(records)
+    opened = 0
+    for idx, rec in enumerate(records, start=1):
+        tag = str(rec.get("event_tag") or "")
+        fid = str(rec.get("ressource_fonction_id") or "").strip()
+        name = str(rec.get("realise_par") or "")
+        ctl = rec.get("ctl_index")
+        cache_key = fid or (f"name:{name}" if name else "")
+
+        if cache_key and cache_key in cache:
+            rec["ressource_detail"] = dict(cache[cache_key])
+            if fid:
+                rec["ressource_fonction_id"] = fid
+            print(
+                f"Ressource detail {idx}/{total} cached "
+                f"| ctl={ctl} tag={tag} | {name}",
+                flush=True,
+            )
+            continue
+
+        print(
+            f"Ressource detail {idx}/{total} open "
+            f"| ctl={ctl} tag={tag} | {name}",
+            flush=True,
+        )
+        logger.info(
+            "Opening ressource detail | idx=%s/%s ctl=%s tag=%s fid=%s name=%s",
+            idx,
+            total,
+            ctl,
+            tag,
+            fid,
+            name,
+        )
+        try:
+            detail = open_and_scrape_ressource_detail(
+                page,
+                tag,
+                timeout_ms=timeout_ms,
+            )
+            opened += 1
+        except Exception as exc:
+            logger.warning(
+                "Ressource detail failed | tag=%s reason=%s",
+                tag,
+                exc,
+            )
+            print(f"  ! failed for ctl={ctl}: {exc}", flush=True)
+            try:
+                _close_ressource_dialog(page, timeout_ms)
+            except Exception:
+                pass
+            detail = {}
+
+        if detail.get("_fonction_id"):
+            rec["ressource_fonction_id"] = str(detail["_fonction_id"])
+            fid = rec["ressource_fonction_id"]
+        elif fid:
+            rec["ressource_fonction_id"] = fid
+
+        store_key = fid or (f"name:{name}" if name else tag)
+        if store_key and detail:
+            cache[store_key] = detail
+            # Also alias by name so later cards with same label hit cache.
+            if name:
+                cache.setdefault(f"name:{name}", detail)
+
+        rec["ressource_detail"] = detail
+
+    logger.info(
+        "Ressource details done | records=%s unique_opens=%s cache=%s",
+        total,
+        opened,
+        len(cache),
+    )
+    print(
+        f"Ressource details done: {total} records, {opened} modal opens "
+        f"({len(cache)} unique keys)",
+        flush=True,
+    )
     return records
 
 
@@ -168,7 +438,7 @@ def scrape_and_store_vacations(
     json_path: Path | None = None,
     timeout_ms: int = 30_000,
 ) -> tuple[int, Path, Path]:
-    """Wait for list, scroll to end, extract all cards, save SQLite + JSONL."""
+    """Wait, scroll, extract cards, open each ressource modal, save SQLite+JSONL."""
     path = db_path or default_db_path()
     out_json = json_path or default_json_path()
     logger.info("Waiting for vacation container | selector=%s", CONTAINER_SELECTOR)
@@ -187,6 +457,10 @@ def scrape_and_store_vacations(
     print(f"Scrolled File d'attente to end ({count_scrolled} cards in DOM)", flush=True)
 
     records = extract_vacation_events(page)
+    print(f"Extracted {len(records)} vacation cards from DOM", flush=True)
+
+    enrich_with_ressource_details(page, records, timeout_ms=timeout_ms)
+
     saved = upsert_events(records, db_path=path)
     print(f"Saved {saved} vacation events -> {path}", flush=True)
     json_out = export_events_jsonl(records, db_path=path, json_path=out_json)

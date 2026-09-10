@@ -14,7 +14,8 @@ LOG_DIR = RUNTIME_DIR / "logs"
 TEMP_DIR = RUNTIME_DIR / "temp"
 DATA_DIR = RUNTIME_DIR / "data"
 VACATIONS_DB_FILE = DATA_DIR / "vacations.sqlite"
-VACATIONS_JSON_FILE = DATA_DIR / "vacations.jsonl"
+VACATIONS_JSON_DIR = DATA_DIR
+VACATIONS_JSON_FILE = DATA_DIR / "vacations.jsonl"  # legacy alias; prefer timestamped helper
 
 APP_LOG_FILE = LOG_DIR / "app.log"
 
