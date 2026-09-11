@@ -24,10 +24,7 @@ from utils.timing import sleep
 logger = get_logger("scrape_vacations")
 
 CONTAINER_SELECTOR = "#divContainerVacations"
-AGENDA_DATE_HIDDEN_ID = (
-    "ctl00_placeHolderContenuPage_ucPlanningData_"
-    "hiddenFieldCurrentDatePlanningMedical"
-)
+AGENDA_DATE_SELECTOR = "#ucChoixDeLaDate_VDCPeriodeData"
 RESSOURCE_LINK_SUFFIX = "_ucRessourcePrincipaleEventData_lnkBtnRessourceData"
 DIALOG_VISIBLE = ".ui-dialog:visible"
 DIALOG_IFRAME = ".ui-dialog:visible iframe"
@@ -441,23 +438,21 @@ def enrich_with_ressource_details(
 
 
 def read_agenda_date_from_page(page: Page) -> str:
-    """Read selected agenda date from UEGAR planning context (DD/MM/YYYY)."""
+    """Read selected agenda date from #ucChoixDeLaDate_VDCPeriodeData only."""
     raw = page.evaluate(
-        """(hiddenId) => {
-          const pick = (el) => (el && el.value ? String(el.value).trim() : '');
-          const primary = document.getElementById(hiddenId);
-          let value = pick(primary);
-          if (value) return { source: hiddenId, value };
-          const nodes = Array.from(
-            document.querySelectorAll('input[type="hidden"]')
-          ).filter((el) => /currentdate|dateplanning|datedujour/i.test(el.id || ''));
-          for (const el of nodes) {
-            value = pick(el);
-            if (value) return { source: el.id, value };
-          }
-          return { source: null, value: '' };
+        """(sel) => {
+          const el = document.querySelector(sel);
+          if (!el) return { source: null, value: '' };
+          const selected = (el.getAttribute('selectedvalue') || '').trim();
+          const text = (el.textContent || '').replace(/\\s+/g, ' ').trim();
+          return {
+            source: sel,
+            value: selected || text,
+            selectedvalue: selected,
+            text: text,
+          };
         }""",
-        AGENDA_DATE_HIDDEN_ID,
+        AGENDA_DATE_SELECTOR,
     )
     value = ""
     source = None
@@ -467,7 +462,7 @@ def read_agenda_date_from_page(page: Page) -> str:
     if not value:
         raise RuntimeError(
             "Selected agenda date not found on page "
-            f"(expected #{AGENDA_DATE_HIDDEN_ID})"
+            f"(expected {AGENDA_DATE_SELECTOR}[selectedvalue])"
         )
     normalized = _normalize_agenda_date(value)
     if not normalized:
