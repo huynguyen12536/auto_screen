@@ -97,7 +97,21 @@ def main() -> None:
             timeout_seconds=settings.backend_import.timeout_seconds,
             enabled=settings.backend_import.enabled,
         )
-        import_api.upload_file(agenda_import_json)
+        import_result = import_api.upload_file(agenda_import_json)
+        if import_result is not None:
+            print(
+                f"Backend import response: "
+                f"importId={import_result.import_id} "
+                f"partial={import_result.partial} "
+                f"warnings={import_result.warning_count}"
+            )
+            if import_result.response_path is not None:
+                print(f"Backend import response file: {import_result.response_path}")
+                logger.info(
+                    "Backend import response persisted | path=%s raw=%s",
+                    import_result.response_path,
+                    import_result.raw,
+                )
     except (LoginFailedError, AgendasNavigationError, AgendaImportApiError) as exc:
         print(f"Flow failed: {exc}")
         logger.error("Flow failed (no retry) | reason=%s", exc)
