@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 from typing import Any
 
@@ -9,9 +10,13 @@ from playwright.sync_api import Page, TimeoutError as PlaywrightTimeoutError
 
 from feature.agendas.vacations_db import (
     default_db_path,
-    default_json_path,
     export_events_jsonl,
+    paired_run_output_paths,
     upsert_events,
+)
+from feature.formatter.payload_formatter import (
+    build_import_payload,
+    write_import_payload,
 )
 from utils.logger import get_logger
 from utils.timing import sleep
@@ -19,6 +24,10 @@ from utils.timing import sleep
 logger = get_logger("scrape_vacations")
 
 CONTAINER_SELECTOR = "#divContainerVacations"
+AGENDA_DATE_HIDDEN_ID = (
+    "ctl00_placeHolderContenuPage_ucPlanningData_"
+    "hiddenFieldCurrentDatePlanningMedical"
+)
 RESSOURCE_LINK_SUFFIX = "_ucRessourcePrincipaleEventData_lnkBtnRessourceData"
 DIALOG_VISIBLE = ".ui-dialog:visible"
 DIALOG_IFRAME = ".ui-dialog:visible iframe"
@@ -431,16 +440,98 @@ def enrich_with_ressource_details(
     return records
 
 
+def read_agenda_date_from_page(page: Page) -> str:
+    """Read selected agenda date from UEGAR planning context (DD/MM/YYYY)."""
+    raw = page.evaluate(
+        """(hiddenId) => {
+          const pick = (el) => (el && el.value ? String(el.value).trim() : '');
+          const primary = document.getElementById(hiddenId);
+          let value = pick(primary);
+          if (value) return { source: hiddenId, value };
+          const nodes = Array.from(
+            document.querySelectorAll('input[type="hidden"]')
+          ).filter((el) => /currentdate|dateplanning|datedujour/i.test(el.id || ''));
+          for (const el of nodes) {
+            value = pick(el);
+            if (value) return { source: el.id, value };
+          }
+          return { source: null, value: '' };
+        }""",
+        AGENDA_DATE_HIDDEN_ID,
+    )
+    value = ""
+    source = None
+    if isinstance(raw, dict):
+        value = str(raw.get("value") or "").strip()
+        source = raw.get("source")
+    if not value:
+        raise RuntimeError(
+            "Selected agenda date not found on page "
+            f"(expected #{AGENDA_DATE_HIDDEN_ID})"
+        )
+    normalized = _normalize_agenda_date(value)
+    if not normalized:
+        raise RuntimeError(
+            f"Could not normalize agenda date from page value {value!r} "
+            f"(source={source})"
+        )
+    logger.info(
+        "Agenda date from page | source=%s raw=%s normalized=%s",
+        source,
+        value,
+        normalized,
+    )
+    return normalized
+
+
+def _normalize_agenda_date(value: str) -> str | None:
+    text = value.strip()
+    if not text:
+        return None
+    # DD/MM/YYYY
+    m = re.fullmatch(r"(\d{2})/(\d{2})/(\d{4})", text)
+    if m:
+        return f"{m.group(1)}/{m.group(2)}/{m.group(3)}"
+    # YYYY-MM-DD or YYYY/MM/DD
+    m = re.fullmatch(r"(\d{4})[-/](\d{2})[-/](\d{2})", text)
+    if m:
+        return f"{m.group(3)}/{m.group(2)}/{m.group(1)}"
+    # YYYYMMDD
+    m = re.fullmatch(r"(\d{4})(\d{2})(\d{2})", text)
+    if m:
+        return f"{m.group(3)}/{m.group(2)}/{m.group(1)}"
+    # DD-MM-YYYY
+    m = re.fullmatch(r"(\d{2})-(\d{2})-(\d{4})", text)
+    if m:
+        return f"{m.group(1)}/{m.group(2)}/{m.group(3)}"
+    return None
+
+
 def scrape_and_store_vacations(
     page: Page,
     *,
     db_path: Path | None = None,
     json_path: Path | None = None,
+    import_json_path: Path | None = None,
+    agenda_code: str = "BRESSUIRE",
+    agenda_label: str | None = None,
+    agenda_date: str | None = None,
+    display_name: str | None = None,
     timeout_ms: int = 30_000,
-) -> tuple[int, Path, Path]:
-    """Wait, scroll, extract cards, open each ressource modal, save SQLite+JSONL."""
+) -> tuple[int, Path, Path, Path]:
+    """Scrape cards, save raw JSONL + Backend agenda-import JSON (same stamp)."""
     path = db_path or default_db_path()
-    out_json = json_path or default_json_path()
+    if json_path is None or import_json_path is None:
+        _, paired_jsonl, paired_import = paired_run_output_paths()
+        out_json = json_path or paired_jsonl
+        out_import = import_json_path or paired_import
+    else:
+        out_json = json_path
+        out_import = import_json_path
+
+    label = (agenda_label or agenda_code or "").strip() or agenda_code
+    selected_date = (agenda_date or "").strip() or read_agenda_date_from_page(page)
+
     logger.info("Waiting for vacation container | selector=%s", CONTAINER_SELECTOR)
     print(f"Waiting for {CONTAINER_SELECTOR}...", flush=True)
     try:
@@ -465,11 +556,30 @@ def scrape_and_store_vacations(
     print(f"Saved {saved} vacation events -> {path}", flush=True)
     json_out = export_events_jsonl(records, db_path=path, json_path=out_json)
     print(f"Exported JSONL ({saved} lines) -> {json_out}", flush=True)
+
+    payload, warnings = build_import_payload(
+        records,
+        agenda_code=agenda_code,
+        agenda_label=label,
+        agenda_date=selected_date,
+        display_name=display_name,
+    )
+    for warning in warnings:
+        logger.warning("Formatter warning | %s", warning)
+        print(f"Formatter WARN: {warning}", flush=True)
+    import_out = write_import_payload(payload, path=out_import)
+    print(
+        f"Exported agenda-import ({len(payload['appointments'])} appointments, "
+        f"{len(payload['resources'])} resources) -> {import_out}",
+        flush=True,
+    )
     logger.info(
-        "Vacations scraped | dom=%s saved=%s db=%s json=%s",
+        "Vacations scraped | dom=%s saved=%s db=%s json=%s import=%s date=%s",
         count_scrolled,
         saved,
         path,
         json_out,
+        import_out,
+        selected_date,
     )
-    return saved, path, json_out
+    return saved, path, json_out, import_out

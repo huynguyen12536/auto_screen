@@ -104,8 +104,8 @@ class BrowserAutomationService:
 
     def open_agendas(
         self, stem_prefix: str = "uegar"
-    ) -> tuple[Path, Path, Path, Path, Path, Path, Path]:
-        """Open Agendas, run B1–B3, scrape vacations to SQLite+JSONL; return paths."""
+    ) -> tuple[Path, Path, Path, Path, Path, Path, Path, Path]:
+        """Open Agendas, scrape vacations, write raw JSONL + agenda-import JSON."""
         if not self._use_playwright:
             raise NotImplementedError(
                 "Agendas navigation requires browser.engine=playwright"

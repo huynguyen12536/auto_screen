@@ -151,13 +151,23 @@ def upsert_events(
 
 def default_json_path() -> Path:
     """New file each run: vacations_YYYYMMDD_HHMM.jsonl."""
+    _, jsonl_path, _ = paired_run_output_paths()
+    return jsonl_path
+
+
+def paired_run_output_paths(
+    stamp: str | None = None,
+) -> tuple[str, Path, Path]:
+    """Same timestamp for vacations_*.jsonl and agenda-import_*.json."""
     ensure_runtime_dirs()
-    stamp = datetime.now().strftime("%Y%m%d_%H%M")
-    path = VACATIONS_JSON_DIR / f"vacations_{stamp}.jsonl"
-    if path.exists():
-        stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        path = VACATIONS_JSON_DIR / f"vacations_{stamp}.jsonl"
-    return path
+    run_stamp = stamp or datetime.now().strftime("%Y%m%d_%H%M")
+    jsonl_path = VACATIONS_JSON_DIR / f"vacations_{run_stamp}.jsonl"
+    import_path = VACATIONS_JSON_DIR / f"agenda-import_{run_stamp}.json"
+    if jsonl_path.exists() or import_path.exists():
+        run_stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        jsonl_path = VACATIONS_JSON_DIR / f"vacations_{run_stamp}.jsonl"
+        import_path = VACATIONS_JSON_DIR / f"agenda-import_{run_stamp}.json"
+    return run_stamp, jsonl_path, import_path
 
 
 def _row_for_export(row: dict[str, Any]) -> dict[str, Any]:

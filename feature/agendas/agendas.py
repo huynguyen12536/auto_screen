@@ -9,7 +9,7 @@ Flow:
 6. Step 2: ensure Ressource "Tout sélectionner" is checked, wait calendar glyph,
    screenshot.
 7. Step 3: ensure view is "File d'attente", wait calendar glyph, screenshot.
-8. When B1/B2/B3 complete: scrape #divContainerVacations into SQLite.
+8. When B1/B2/B3 complete: scrape vacations → SQLite + raw JSONL + agenda-import JSON.
 """
 
 from __future__ import annotations
@@ -51,7 +51,7 @@ class UegarAgendasFeature:
 
     def run(
         self, stem_prefix: str = "uegar"
-    ) -> tuple[Path, Path, Path, Path, Path, Path, Path]:
+    ) -> tuple[Path, Path, Path, Path, Path, Path, Path, Path]:
         button = self._agendas.button
         logger.info("Waiting for Agendas button | selector=%s", button)
         print(f"Waiting for Agendas: {button}...", flush=True)
@@ -127,19 +127,26 @@ class UegarAgendasFeature:
             )
 
         try:
-            saved, db_path, json_path = scrape_and_store_vacations(
+            planning_cfg = self._agendas.planning
+            agenda_label = (
+                planning_cfg.option_label if planning_cfg is not None else "BRESSUIRE"
+            )
+            saved, db_path, json_path, import_path = scrape_and_store_vacations(
                 self._page,
                 timeout_ms=self._timeout_ms,
+                agenda_code=agenda_label,
+                agenda_label=agenda_label,
             )
         except RuntimeError as exc:
             raise AgendasNavigationError(str(exc)) from exc
         logger.info(
-            "Vacations stored after steps complete | saved=%s db=%s json=%s",
+            "Vacations stored after steps complete | saved=%s db=%s json=%s import=%s",
             saved,
             db_path,
             json_path,
+            import_path,
         )
-        return before, after, planning, ressource, vue, db_path, json_path
+        return before, after, planning, ressource, vue, db_path, json_path, import_path
 
     def is_step1_planning_done(self) -> bool:
         planning = self._agendas.planning
