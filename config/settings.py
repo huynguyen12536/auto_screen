@@ -303,6 +303,15 @@ class LoginSettings:
 
 
 @dataclass(frozen=True)
+class BackendImportSettings:
+    enabled: bool
+    base_url: str
+    bot_email: str
+    bot_password: str
+    timeout_seconds: float
+
+
+@dataclass(frozen=True)
 class Settings:
     environment: str
     browser: BrowserSettings
@@ -314,6 +323,7 @@ class Settings:
     target_url: str
     target_username: str
     target_password: str
+    backend_import: BackendImportSettings
 
     def masked_username(self) -> str:
         value = self.target_username
@@ -325,6 +335,13 @@ class Settings:
 
     def masked_password(self) -> str:
         return "********" if self.target_password else ""
+
+
+def _env_bool(name: str, default: bool = False) -> bool:
+    value = os.getenv(name)
+    if value is None or not str(value).strip():
+        return default
+    return str(value).strip().lower() in {"1", "true", "yes", "on"}
 
 
 def _load_yaml_config(path: Path, schema: dict[str, Any]) -> dict[str, Any]:
@@ -537,6 +554,16 @@ def _build_settings(
         target_url=_env("TARGET_URL"),
         target_username=_env("TARGET_USERNAME"),
         target_password=_env("TARGET_PASSWORD"),
+        backend_import=BackendImportSettings(
+            enabled=_env_bool("BACKEND_IMPORT_ENABLED", True),
+            base_url=_env(
+                "BACKEND_API_URL",
+                "https://sist79-be.vm.dfm-europe.com",
+            ),
+            bot_email=_env("UEGAR_BOT_EMAIL", "uegar.bot@internal.local"),
+            bot_password=_env("UEGAR_BOT_PASSWORD"),
+            timeout_seconds=_env_float("BACKEND_IMPORT_TIMEOUT_SECONDS", 120.0),
+        ),
     )
 
 

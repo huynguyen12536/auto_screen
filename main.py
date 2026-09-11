@@ -16,6 +16,10 @@ from config.settings import clear_settings_cache, load_settings
 from feature.agendas import AgendasNavigationError
 from feature.login import LoginFailedError
 from feature.opencv.runtime import configure_opencv
+from services.agenda_import_api_service import (
+    AgendaImportApiError,
+    AgendaImportApiService,
+)
 from services.browser_automation_service import BrowserAutomationService
 from utils.logger import get_logger, setup_logging
 from utils.paths import ensure_runtime_dirs
@@ -44,6 +48,10 @@ def main() -> None:
     print(f"Ready selector: {settings.browser.ready_selector}")
     print(f"Opening: {settings.target_url}")
     print(f"Login user: {settings.masked_username()}")
+    print(
+        f"Backend import: enabled={settings.backend_import.enabled} "
+        f"url={settings.backend_import.base_url}"
+    )
 
     logger.info("Browser automation started")
     logger.info("OpenCV configured | version=%s", opencv.version)
@@ -81,7 +89,16 @@ def main() -> None:
             vacations_json,
             agenda_import_json,
         )
-    except (LoginFailedError, AgendasNavigationError) as exc:
+
+        import_api = AgendaImportApiService(
+            base_url=settings.backend_import.base_url,
+            bot_email=settings.backend_import.bot_email,
+            bot_password=settings.backend_import.bot_password,
+            timeout_seconds=settings.backend_import.timeout_seconds,
+            enabled=settings.backend_import.enabled,
+        )
+        import_api.upload_file(agenda_import_json)
+    except (LoginFailedError, AgendasNavigationError, AgendaImportApiError) as exc:
         print(f"Flow failed: {exc}")
         logger.error("Flow failed (no retry) | reason=%s", exc)
         sys.exit(1)
